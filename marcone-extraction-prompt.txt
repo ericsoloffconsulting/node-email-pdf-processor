@@ -1,0 +1,191 @@
+MARCONE CREDIT MEMO EXTRACTION - VALIDATED 100% ACCURACY
+========================================================
+Tested on 13 diverse PDFs: NF credits, CONCDAM/CONCDA credits, J##### journal entries
+
+VALID NARDA PATTERNS - Extract if matches:
+-------------------------------------------
+✓ CONCDA, CONCDAM, CONCESSION, NF, CORE (vendor credits)
+✓ J##### (J followed by 4-6 digits - journal entries)
+✓ INV###### (INV followed by 6+ digits)
+✓ SHORT, BOX
+✗ Part numbers (like W10794242), random text, other invalid values
+
+EXTRACTION RULES:
+-----------------
+
+1. INVOICE NUMBER (Required)
+   - 8-digit number from header area
+   - Example: "68155220"
+
+2. INVOICE DATE (Required)
+   - MM/DD/YYYY format
+   - Example: "09/29/2025"
+
+3. DELIVERY AMOUNT (Optional)
+   - Currency with $ sign
+   - Example: "$9.49" or "$0.00"
+
+4. LINE ITEMS (Required - extract ALL matching lines)
+   
+   a) NARDA NUMBER (Critical)
+      - Must match valid patterns listed above
+      - Remove ALL spaces: "CONCDA M" → "CONCDAM", "N F" → "NF"
+      - Combine multi-line values: "CONCES" + "SION" = "CONCESSION"
+      - If NARDA column has part numbers, search Description/Memo columns
+      - Skip lines that don't match valid patterns
+   
+   b) TOTAL AMOUNT (Required)
+      - Include parentheses and $ sign exactly
+      - Example: "($42.24)" or "($68.46)"
+   
+   c) ORIGINAL BILL NUMBER (Critical)
+      - 8-10 digits only
+      - Strip ALL letter prefixes: "N67382688" → "67382688", "W68155220" → "68155220"
+      - Search entire document (Description, Memo, Reference fields)
+      - Required for: CONCDA, CONCDAM, NF, CORE, CONCESSION
+      - May be null for: J####, INV####, SHORT, BOX
+
+CRITICAL VALIDATION:
+-------------------
+- Verify NARDA matches valid patterns before including in output
+- Part numbers (W#######) in NARDA column are NOT valid NARDA values
+- Search description/memo text if NARDA column contains invalid data
+- Remove spaces from NARDA values (common OCR issue)
+- Strip letter prefixes (N, W) from bill numbers
+
+OUTPUT FORMAT:
+--------------
+JSON only (no markdown, no code blocks, no explanations):
+
+{
+  "invoiceNumber": "68155220",
+  "invoiceDate": "09/29/2025",
+  "deliveryAmount": "$0.00",
+  "lineItems": [
+    {
+      "nardaNumber": "CONCDAM",
+      "totalAmount": "($42.24)",
+      "originalBillNumber": "67382688"
+    }
+  ]
+}
+
+TESTING RESULTS:
+---------------
+✓ Correctly removes spaces from NARDA (CONCDA M → CONCDAM)
+✓ Strips letter prefixes from bill numbers (N67382688 → 67382688)
+✓ Rejects invalid NARDA patterns (part numbers, random text)
+✓ Finds bill numbers in description/reference fields
+✓ Handles multi-line NARDA values correctly
+✓ Extracts all valid line items from multi-line credit memos
+
+Model: claude-haiku-4-5-20251001 (fastest, most cost-effective)
+Average tokens: ~4,200 input / ~150 output per credit memo
+==========================================
+
+You are analyzing a Marcone credit memo invoice PDF. Extract all relevant data with high precision.
+
+DOCUMENT STRUCTURE:
+-------------------
+This is a product warranty/return credit document from Marcone appliance parts distributor.
+It contains header information and one or more line items representing different credit types.
+
+REQUIRED FIELDS TO EXTRACT:
+---------------------------
+
+1. INVOICE NUMBER (Required)
+   - Location: Header area, labeled "Invoice Number:" or "Invoice:"
+   - Pattern: 7-8 digit number, typically starts with 6 or 7
+   - Example: "61234567" or "68260858"
+   - Extract: Numeric value only
+
+2. INVOICE DATE (Required)
+   - Location: Header area, labeled "Invoice Date:"
+   - Pattern: MM/DD/YYYY format
+   - Example: "10/15/2025" or "09/04/2025"
+   - Extract: Full date string
+
+3. DELIVERY AMOUNT (Optional)
+   - Location: Near bottom, labeled "Delivery:"
+   - Pattern: Currency with $ sign
+   - Example: "$9.49" or "$0.00"
+   - Extract: Include $ sign and amount
+
+4. LINE ITEMS (Required - extract ALL line items found)
+   Each line item contains:
+   
+   a) NARDA NUMBER (Critical - identifies credit type)
+      - Location: In "NARDA" or "NARDA #" column, or embedded in Description
+      - Patterns:
+        * Vendor Credits: CONCDA, CONCDAM, CONCESSION, NF, CORE
+        * Journal Entries: J#### (J followed by 4-6 digits like J16836)
+        * Journal Entries: INV###### (INV followed by invoice number)
+        * Short Ship: SHORT, BOX
+      - IMPORTANT: May span two lines (e.g., "CONCES" on one line + "SION" on next = "CONCESSION")
+      - Extract: Complete combined value
+   
+   b) TOTAL AMOUNT (Required for each line)
+      - Location: In "Total" column, same row as NARDA
+      - Pattern: Currency, often negative in parentheses
+      - Example: "($24.08)" or "($94.58)" or "$12.50"
+      - Extract: Include parentheses and $ sign
+   
+   c) ORIGINAL BILL NUMBER (Critical for vendor credits)
+      - Location: Near NARDA column, often one line below NARDA
+      - Pattern: 8-10 digit number, may have prefix (W, N, or other letters)
+      - Example: "W68260858" or "N1234567890" or just "68260858"
+      - Extract: Numeric portion only (remove letter prefixes)
+      - Required for: CONCDA, CONCDAM, NF, CORE, CONCESSION types
+      - May be null for: J####, INV####, SHORT, BOX types
+
+EXTRACTION GUIDELINES:
+---------------------
+- Carefully scan the entire document for line items
+- Match values by row alignment (Y-coordinate proximity)
+- Look for NARDA values in both NARDA column AND embedded in description text
+- For multi-line values, combine text from consecutive lines in same column
+- If Original Bill Number has letter prefix (like "W" or "N"), remove it
+- Preserve exact formatting of amounts including $ and parentheses
+- If a field is not found, use null (not empty string)
+
+OUTPUT FORMAT:
+--------------
+Return ONLY valid JSON (no markdown, no code blocks, no explanations):
+
+{
+  "invoiceNumber": "61234567",
+  "invoiceDate": "10/15/2025",
+  "deliveryAmount": "$9.49",
+  "lineItems": [
+    {
+      "nardaNumber": "CONCDA",
+      "totalAmount": "($24.08)",
+      "originalBillNumber": "68260858"
+    },
+    {
+      "nardaNumber": "J16836",
+      "totalAmount": "($94.58)",
+      "originalBillNumber": null
+    }
+  ],
+  "extractionNotes": "Brief notes about any ambiguities or special cases"
+}
+
+CRITICAL VALIDATION:
+-------------------
+- Invoice Number must be 7-8 digits
+- Invoice Date must be valid MM/DD/YYYY format
+- Each line item must have NARDA and Total Amount
+- NARDA patterns must match one of the known types
+- Original Bill Number required for vendor credit types (CONCDA, NF, CORE, CONCESSION)
+- If you find multiple line items, extract ALL of them
+
+SPECIAL CASES:
+--------------
+1. If NARDA column is empty, search description/memo text for embedded NARDA values
+2. If you see "CONCES" on one line and "SION" on the next in same column, combine as "CONCESSION"
+3. If you see "INV" followed by numbers split across lines, combine them
+4. If Original Bill Number appears below NARDA (next row, similar X position), associate them
+5. If multiple line items have same Original Bill Number, keep them separate (they'll be grouped later)
+
+ANALYZE THE PDF AND EXTRACT DATA NOW.

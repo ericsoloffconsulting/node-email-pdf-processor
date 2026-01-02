@@ -1,0 +1,30 @@
+{
+  "name": "email-pdf-processor",
+  "version": "1.0.0",
+  "description": "Poll IMAP email server for PDF attachments and process them with Claude AI",
+  "main": "email-poller.js",
+  "scripts": {
+    "start": "node email-poller.js",
+    "test": "node email-poller.js"
+  },
+  "keywords": [
+    "imap",
+    "email",
+    "pdf",
+    "claude",
+    "ai",
+    "anthropic"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "axios": "^1.13.2",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^16.4.7",
+    "imap": "^0.8.19",
+    "mailparser": "^3.7.1",
+    "oauth-1.0a": "^2.2.6",
+    "pdf-lib": "^1.17.1"
+  }
+}

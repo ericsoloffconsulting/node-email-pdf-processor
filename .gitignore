@@ -1,0 +1,23 @@
+# Environment variables (contains sensitive credentials)
+.env
+
+# Dependencies
+node_modules/
+
+# Output directories
+processed-pdfs/
+results/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
