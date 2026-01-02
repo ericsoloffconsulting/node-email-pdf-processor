@@ -209,12 +209,14 @@ VALID NARDA PATTERNS - Extract if matches:
 
 EXTRACT FROM PDF:
 1. isCreditMemo: true/false (based on WARRANTY CREDIT, RETURN CREDIT, or CREDIT MEMO text presence)
-2. Invoice Number: 8-digit number at top left
-3. Invoice Date: MM/DD/YYYY format
-4. PO Number: Look in top right corner area, labeled as "P.O. Number" or "PO#" (may be empty/blank)
-5. Delivery Amount: Dollar amount with $ symbol (from delivery line)
-6. Document Total: Grand total at bottom (e.g., "($136.68)" or "$0.00")
-7. Line Items - ONLY IF isCreditMemo=true, for EACH line with valid NARDA:
+2. Credit Type: Extract EXACT text from top right header - will be either "Warranty Credit" or "Return Credit"
+   Leave empty string if neither found
+3. Invoice Number: 8-digit number at top left
+4. Invoice Date: MM/DD/YYYY format
+5. PO Number: Look in top right corner area, labeled as "P.O. Number" or "PO#" (may be empty/blank)
+6. Delivery Amount: Dollar amount with $ symbol (from delivery line)
+7. Document Total: Grand total at bottom (e.g., "($136.68)" or "$0.00")
+8. Line Items - ONLY IF isCreditMemo=true, for EACH line with valid NARDA:
    • NARDA Number: Pattern above, remove spaces ("CONCDA M" → "CONCDAM", "N F" → "NF")
    • Total Amount: With ( ) and $ (e.g., "($42.24)")
    • Part Number: From "Part Number" column, on SAME ROW as Total Amount
@@ -263,7 +265,7 @@ CRITICAL RULES:
 • Output ONLY valid JSON, no explanations
 
 EXAMPLE OUTPUT:
-{"isCreditMemo":true,"invoiceNumber":"67718510","invoiceDate":"09/11/2025","poNumber":"12345","deliveryAmount":"$0.00","documentTotal":"($94.58)","lineItems":[{"nardaNumber":"NF","partNumber":"WR49X10322","totalAmount":"($94.58)","originalBillNumber":"66811026","salesOrderNumber":"SOASER15386"}],"validationError":""}
+{"isCreditMemo":true,"creditType":"Warranty Credit","invoiceNumber":"67718510","invoiceDate":"09/11/2025","poNumber":"12345","deliveryAmount":"$0.00","documentTotal":"($94.58)","lineItems":[{"nardaNumber":"NF","partNumber":"WR49X10322","totalAmount":"($94.58)","originalBillNumber":"66811026","salesOrderNumber":"SOASER15386"}],"validationError":""}
 
 Document: ${filename}`;
 
