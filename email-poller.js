@@ -225,7 +225,7 @@ EXTRACT FROM PDF:
      * If Part Number appears on next line below its Total, skip - only extract when on same row
      * Leave empty string if no part number on same row as Total Amount
    • Bill Number: EMBEDDED IN PRODUCT DESCRIPTION - REQUIRED FOR ALL CREDITS
-     * SEARCH for capital letter N or W followed immediately by 7-8 consecutive digits
+     * SEARCH for capital letter N or W followed immediately by consecutive digits
      * Pattern can appear ANYWHERE in the description text, even in middle of words
      * Extract ONLY the 7-8 digits (exclude the N or W prefix)
      * Examples: 
@@ -235,13 +235,17 @@ EXTRACT FROM PDF:
        - "PUMPN12345678DESC" → extract "12345678" (not N12345678)
        - "BUCKEN69221189" → extract "69221189"
        - "DUAN69221189" → extract "69221189"
-     * CRITICAL: Bill numbers are ALWAYS exactly 7-8 digits
-     * Use regex-like thinking: find [N|W] then extract ONLY the [7-8 digits] after it
-     * If you find N or W with less than 7 digits on current line, check next line
-     * Example multi-line: "REGULATORN668110" + "26" = extract "66811026" (8 digits)
-     * EVERY credit memo line MUST have a bill number - search thoroughly in description
-     * If pattern not obvious, scan entire description carefully for ANY N/W + 7-8 digit sequence
-     * Only leave empty if absolutely no N/W + 7-8 digits exists anywhere in description
+       - "CONFIGUREW699863" + next line "15" → extract "69986315" (8 digits total)
+     * CRITICAL: Bill numbers are ALWAYS exactly 7-8 digits total
+     * MULTI-LINE RULE: If you find N or W with LESS than 7 digits, YOU MUST check the next line
+     * Concatenate digits from next line until you have exactly 7-8 total digits
+     * Example multi-line patterns:
+       - "REGULATORN668110" (6 digits) + "26" = extract "66811026" (8 digits)
+       - "CONFIGUREW699863" (6 digits) + "15" = extract "69986315" (8 digits)
+       - "ITEMW1234567" (7 digits complete) = extract "1234567" (no need for next line)
+     * DO NOT return partial bill numbers with only 5-6 digits
+     * EVERY credit memo line MUST have a bill number - search thoroughly in description AND next line
+     * Only leave empty if absolutely no N/W + 7-8 digits exists anywhere after checking both lines
    • Sales Order Number: Look below product description for "SOASER" followed by digits
      Extract the FULL value including prefix (e.g., "SOASER12345" → "SOASER12345")
      Leave empty string if not found
