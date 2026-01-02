@@ -217,16 +217,31 @@ EXTRACT FROM PDF:
 7. Line Items - ONLY IF isCreditMemo=true, for EACH line with valid NARDA:
    • NARDA Number: Pattern above, remove spaces ("CONCDA M" → "CONCDAM", "N F" → "NF")
    • Total Amount: With ( ) and $ (e.g., "($42.24)")
-   • Bill Number: EMBEDDED IN PRODUCT DESCRIPTION - Look for:
-     * Letter N followed by 7-8 digits (e.g., "BURNRHEAN66811026" → "N66811026")
-     * Letter W followed by 7-8 digits (e.g., "GLASS-DOOW91738138" → "W91738138")
-     * CRITICAL: Bill numbers are ALWAYS 7-8 digits total
-     * If you find N or W with less than 7 digits on current line, YOU MUST check next line
-     * Example: "REGULATORN668110" on line 1 + "26" on line 2 = "N66811026" (8 digits)
-     * Concatenate text across lines to complete the 7-8 digit sequence
-     * NEVER return a partial bill number with only 6 digits or less
-     * Extract just the N or W + complete 7-8 digits ("N66811026" not "N668110")
-     * If no valid 7-8 digit N/W pattern found after checking both lines, leave empty string
+   • Part Number: From "Part Number" column, on SAME ROW as Total Amount
+     * Located between "Make" column and "Description" column
+     * Typically format: letters + numbers (e.g., "WR49X10322", "W11416362", "WR57X10098")
+     * MUST be on the SAME ROW/LINE as the Total Amount for this line item
+     * DO NOT extract text like "REF:" that appears below line items (not aligned with Total)
+     * If Part Number appears on next line below its Total, skip - only extract when on same row
+     * Leave empty string if no part number on same row as Total Amount
+   • Bill Number: EMBEDDED IN PRODUCT DESCRIPTION - REQUIRED FOR ALL CREDITS
+     * SEARCH for capital letter N or W followed immediately by 7-8 consecutive digits
+     * Pattern can appear ANYWHERE in the description text, even in middle of words
+     * Extract ONLY the 7-8 digits (exclude the N or W prefix)
+     * Examples: 
+       - "BURNRHEAN66811026" → extract "66811026" (not N66811026)
+       - "GLASS-DOOW91738138" → extract "91738138" (not W91738138)
+       - "MOTOW70174252" → extract "70174252" (not W70174252)
+       - "PUMPN12345678DESC" → extract "12345678" (not N12345678)
+       - "BUCKEN69221189" → extract "69221189"
+       - "DUAN69221189" → extract "69221189"
+     * CRITICAL: Bill numbers are ALWAYS exactly 7-8 digits
+     * Use regex-like thinking: find [N|W] then extract ONLY the [7-8 digits] after it
+     * If you find N or W with less than 7 digits on current line, check next line
+     * Example multi-line: "REGULATORN668110" + "26" = extract "66811026" (8 digits)
+     * EVERY credit memo line MUST have a bill number - search thoroughly in description
+     * If pattern not obvious, scan entire description carefully for ANY N/W + 7-8 digit sequence
+     * Only leave empty if absolutely no N/W + 7-8 digits exists anywhere in description
    • Sales Order Number: Look below product description for "SOASER" followed by digits
      Extract the FULL value including prefix (e.g., "SOASER12345" → "SOASER12345")
      Leave empty string if not found
@@ -244,7 +259,7 @@ CRITICAL RULES:
 • Output ONLY valid JSON, no explanations
 
 EXAMPLE OUTPUT:
-{"isCreditMemo":true,"invoiceNumber":"67718510","invoiceDate":"09/11/2025","poNumber":"12345","deliveryAmount":"$0.00","documentTotal":"($94.58)","lineItems":[{"nardaNumber":"NF","totalAmount":"($94.58)","originalBillNumber":"N66811026","salesOrderNumber":"15386"}],"validationError":""}
+{"isCreditMemo":true,"invoiceNumber":"67718510","invoiceDate":"09/11/2025","poNumber":"12345","deliveryAmount":"$0.00","documentTotal":"($94.58)","lineItems":[{"nardaNumber":"NF","partNumber":"WR49X10322","totalAmount":"($94.58)","originalBillNumber":"66811026","salesOrderNumber":"SOASER15386"}],"validationError":""}
 
 Document: ${filename}`;
 
