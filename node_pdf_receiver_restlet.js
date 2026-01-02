@@ -54,22 +54,20 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
             
             // Use folder IDs from request payload OR fall back to script parameters
             var pdfFolderId = requestBody.pdfFolderId || defaultPdfFolderId;
-            var csvFolderId = requestBody.csvFolderId || requestBody.jsonFolderId || defaultJsonFolderId;
-            var isCsvOutput = requestBody.isCsvOutput || false;
+            var jsonFolderId = requestBody.jsonFolderId || defaultJsonFolderId;
             
             // Validate parameters
-            if (!pdfFolderId || !csvFolderId) {
-                log.error('Missing Configuration', 'PDF or CSV folder ID not configured');
+            if (!pdfFolderId || !jsonFolderId) {
+                log.error('Missing Configuration', 'PDF or JSON folder ID not configured');
                 return {
                     success: false,
-                    error: 'Folder IDs not provided. Set pdfFolderId/csvFolderId in request or configure script parameters'
+                    error: 'Folder IDs not provided. Set pdfFolderId/jsonFolderId in request or configure script parameters'
                 };
             }
             
             log.audit('Folder Configuration', {
                 pdfFolderId: pdfFolderId,
-                csvFolderId: csvFolderId,
-                isCsvOutput: isCsvOutput,
+                jsonFolderId: jsonFolderId,
                 source: requestBody.pdfFolderId ? 'request payload' : 'script parameters'
             });
             
@@ -110,50 +108,27 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
                 folder: pdfFolderId
             });
             
-            // Save CSV or JSON data if provided
-            var dataFileId = null;
+            // Save JSON data if provided
+            var jsonFileId = null;
             if (requestBody.extractedData) {
-                if (isCsvOutput) {
-                    // Save as CSV file
-                    var csvFilename = timestamp + '_' + baseName + '.csv';
-                    
-                    var csvFile = file.create({
-                        name: csvFilename,
-                        fileType: file.Type.CSV,
-                        contents: requestBody.extractedData,
-                        folder: csvFolderId,
-                        isOnline: false
-                    });
-                    
-                    dataFileId = csvFile.save();
-                    log.audit('CSV Saved', {
-                        fileId: dataFileId,
-                        filename: csvFilename,
-                        folder: csvFolderId
-                    });
-                } else {
-                    // Save as JSON file (legacy)
-                    var jsonContent = JSON.stringify(requestBody.extractedData, null, 2);
-                    var jsonFilename = timestamp + '_' + baseName + '.json';
-                    
-                    var jsonFile = file.create({
-                        name: jsonFilename,
-                dataFileId: dataFileId,
-                fileType: isCsvOutput ? 'CSV' : 'JSON',
-                duration: duration + 'ms'
-            });
-            
-            // Return success response
-            return {
-                success: true,
-                pdfFileId: pdfFileId,
-                csvFileId: dataFileId,
-                jsonFileId: dataFileId, // Backward compatibilityeId,
-                        filename: jsonFilename,
-                        folder: csvFolderId,
-                        invoiceNumber: requestBody.extractedData.invoiceNumber || 'N/A'
-                    });
-                }
+                var jsonContent = JSON.stringify(requestBody.extractedData, null, 2);
+                var jsonFilename = timestamp + '_' + baseName + '.json';
+                
+                var jsonFile = file.create({
+                    name: jsonFilename,
+                    fileType: file.Type.JSON,
+                    contents: jsonContent,
+                    folder: jsonFolderId,
+                    isOnline: false
+                });
+                
+                jsonFileId = jsonFile.save();
+                log.audit('JSON Saved', {
+                    fileId: jsonFileId,
+                    filename: jsonFilename,
+                    folder: jsonFolderId,
+                    invoiceNumber: requestBody.extractedData.invoiceNumber || 'N/A'
+                });
             }
             
             var endTime = new Date().getTime();
