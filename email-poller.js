@@ -476,7 +476,7 @@ async function saveResult(result) {
 /**
  * Uploads PDF and extracted data to NetSuite via RESTlet
  */
-async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject, folderIds = null) {
+async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject, folderIds = null, isCsvOutput = false) {
   if (!CONFIG.netsuite.enabled) {
     console.log('  ℹ️  NetSuite upload disabled (set NETSUITE_ENABLED=true to enable)');
     return { success: false, reason: 'disabled' };
@@ -487,13 +487,13 @@ async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject
 
     // Use processor-specific folder IDs or fall back to defaults
     const pdfFolderId = folderIds?.pdfFolderId || CONFIG.netsuite.defaultPdfFolderId;
-    const jsonFolderId = folderIds?.jsonFolderId || CONFIG.netsuite.defaultJsonFolderId;
+    const csvFolderId = folderIds?.csvFolderId || folderIds?.jsonFolderId || CONFIG.netsuite.defaultJsonFolderId;
     
     if (pdfFolderId) {
       console.log(`    PDF Folder ID: ${pdfFolderId}`);
     }
-    if (jsonFolderId) {
-      console.log(`    JSON Folder ID: ${jsonFolderId}`);
+    if (csvFolderId) {
+      console.log(`    ${isCsvOutput ? 'CSV' : 'JSON'} Folder ID: ${csvFolderId}`);
     }
 
     // Create OAuth 1.0a signature
@@ -530,9 +530,10 @@ async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject
       pdfFilename: filename,
       emailSubject: emailSubject,
       extractedData: extractedData,
+      isCsvOutput: isCsvOutput,
       processedDate: new Date().toISOString(),
       pdfFolderId: pdfFolderId,
-      jsonFolderId: jsonFolderId
+      csvFolderId: csvFolderId
     };
 
     // Send to NetSuite
@@ -546,7 +547,7 @@ async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject
 
     console.log(`  ✓ Uploaded to NetSuite successfully`);
     console.log(`    PDF File ID: ${response.data.pdfFileId || 'N/A'}`);
-    console.log(`    JSON File ID: ${response.data.jsonFileId || 'N/A'}`);
+    console.log(`    ${isCsvOutput ? 'CSV' : 'JSON'} File ID: ${response.data.csvFileId || response.data.jsonFileId || 'N/A'}`);
 
     return {
       success: true,
@@ -642,22 +643,58 @@ async function processEmail(seqno, imap) {
               if (result.success) {
                 console.log(`  ✓ [${index + 1}/${pdfAttachments.length}] Claude analysis complete for ${pdf.filename}`);
 
-                // Parse extracted data from JSON
+                // Detect if response is CSV or JSON
                 let extractedData = null;
+                let isCsvOutput = false;
+                let csvData = null;
+                
                 try {
-                  // Extract JSON from Claude response (may be wrapped in ```json)
-                  let jsonStr = result.analysis;
-                  if (jsonStr.includes('```json')) {
-                    const startIdx = jsonStr.indexOf('```json') + 7;
-                    const endIdx = jsonStr.indexOf('```', startIdx);
-                    jsonStr = jsonStr.substring(startIdx, endIdx).trim();
-                  }
-                  extractedData = JSON.parse(jsonStr);
-                  console.log(`  ✓ Parsed: Invoice ${extractedData.invoiceNumber || 'N/A'}`);
+                  let responseText = result.analysis;
                   
-                  // Validate original bill numbers are 8 digits
-                  const validationResult = validateBillNumbers(extractedData);
-                  if (!validationResult.valid && retryCount === 0) {
+                  // Check if response is CSV (starts with column headers)
+                  if (responseText.includes('invoiceNumber,invoiceDate') || 
+                      responseText.startsWith('invoiceNumber,')) {
+                    isCsvOutput = true;
+                    
+                    // Extract CSV from Claude response (may be wrapped in ```csv)
+                    if (responseText.includes('```csv')) {
+                      const startIdx = responseText.indexOf('```csv') + 6;
+                      const endIdx = responseText.indexOf('```', startIdx);
+                      csvData = responseText.substring(startIdx, endIdx).trim();
+                    } else if (responseText.includes('```')) {
+                      const startIdx = responseText.indexOf('```') + 3;
+                      const endIdx = responseText.indexOf('```', startIdx);
+                      csvData = responseText.substring(startIdx, endIdx).trim();
+                    } else {
+                      csvData = responseText.trim();
+                    }
+                    
+                    // Parse first data row to extract invoice number for logging
+                    const lines = csvData.split('\n');
+                    if (lines.length > 1) {
+                      const firstDataRow = lines[1].split(',');
+                      const invoiceNum = firstDataRow[0] || 'N/A';
+                      console.log(`  ✓ Parsed CSV: Invoice ${invoiceNum}`);
+                    }
+                    
+                    // Store CSV text as extractedData
+                    extractedData = csvData;
+                    
+                  } else {
+                    // Handle JSON output (legacy)
+                    let jsonStr = responseText;
+                    if (jsonStr.includes('```json')) {
+                      const startIdx = jsonStr.indexOf('```json') + 7;
+                      const endIdx = jsonStr.indexOf('```', startIdx);
+                      jsonStr = jsonStr.substring(startIdx, endIdx).trim();
+                    }
+                    extractedData = JSON.parse(jsonStr);
+                    console.log(`  ✓ Parsed JSON: Invoice ${extractedData.invoiceNumber || 'N/A'}`);
+                  }
+                  
+                  // Validate original bill numbers are 8 digits (only for JSON)
+                  const validationResult = isCsvOutput ? { valid: true } : validateBillNumbers(extractedData);
+                  if (!isCsvOutput && !validationResult.valid && retryCount === 0) {
                     console.log(`  ⚠️  Bill number validation failed: ${validationResult.reason}`);
                     console.log(`  🔄 Retrying with enhanced prompt (attempt 2/2)...`);
                     
@@ -702,6 +739,7 @@ async function processEmail(seqno, imap) {
                 await saveResult({
                   ...result,
                   extractedData,
+                  isCsvOutput,
                   emailFrom: parsed.from?.text,
                   emailDate: parsed.date,
                   processedAt: new Date().toISOString()
@@ -714,7 +752,8 @@ async function processEmail(seqno, imap) {
                     pdf.filename,
                     extractedData,
                     parsed.subject || 'No Subject',
-                    processor.netsuite // Pass folder IDs from matched processor
+                    processor.netsuite, // Pass folder IDs from matched processor
+                    isCsvOutput // Pass flag to indicate CSV vs JSON
                   );
                 }
                 
