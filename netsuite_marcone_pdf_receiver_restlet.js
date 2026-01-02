@@ -86,24 +86,17 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime'], function(file, log, encode,
                 pdfSize: requestBody.pdfBase64.length
             });
             
-            // Decode PDF from base64
-            var pdfBinary = encode.convert({
-                string: requestBody.pdfBase64,
-                inputEncoding: encode.Encoding.BASE_64,
-                outputEncoding: encode.Encoding.HEX
-            });
-            
             // Create unique filename with timestamp
             var timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             var baseName = requestBody.pdfFilename.replace(/\.pdf$/i, '');
             var pdfFilename = timestamp + '_' + baseName + '.pdf';
             
-            // Save PDF file
+            // Save PDF file directly from base64
             var pdfFile = file.create({
                 name: pdfFilename,
                 fileType: file.Type.PDF,
-                contents: pdfBinary,
-                encoding: file.Encoding.HEX,
+                contents: requestBody.pdfBase64,
+                encoding: file.Encoding.BASE_64,
                 folder: pdfFolderId,
                 isOnline: false
             });
