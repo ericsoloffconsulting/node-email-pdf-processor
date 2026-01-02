@@ -27,6 +27,37 @@ const OAuth = require('oauth-1.0a');
 const crypto = require('crypto');
 const axios = require('axios');
 
+// Email Processor Rules - Define different email types and their routing
+const EMAIL_PROCESSORS = [
+  {
+    name: 'marcone_credits',
+    enabled: process.env.MARCONE_ENABLED !== 'false',
+    criteria: {
+      from: 'no-replies@marcone.com',
+      subjectContains: 'Credits processed by Marcone for 2684000'
+    },
+    netsuite: {
+      pdfFolderId: process.env.MARCONE_PDF_FOLDER_ID,
+      jsonFolderId: process.env.MARCONE_JSON_FOLDER_ID
+    },
+    claudePrompt: 'marcone' // Special identifier for Marcone prompt
+  }
+  // Add more processors here:
+  // {
+  //   name: 'vendor_invoices',
+  //   enabled: process.env.VENDOR_ENABLED === 'true',
+  //   criteria: {
+  //     from: 'vendor@example.com',
+  //     subjectContains: 'Invoice'
+  //   },
+  //   netsuite: {
+  //     pdfFolderId: process.env.VENDOR_PDF_FOLDER_ID,
+  //     jsonFolderId: process.env.VENDOR_JSON_FOLDER_ID
+  //   },
+  //   claudePrompt: 'vendor_invoice'
+  // }
+];
+
 // Configuration from environment variables
 const CONFIG = {
   // IMAP Settings
@@ -42,7 +73,7 @@ const CONFIG = {
   // Claude API Settings
   claude: {
     apiKey: process.env.ANTHROPIC_API_KEY,
-    model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
+    model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001',
     maxTokens: parseInt(process.env.CLAUDE_MAX_TOKENS || '4096')
   },
 
@@ -62,7 +93,7 @@ const CONFIG = {
     resultsDir: process.env.RESULTS_DIR || './results'
   },
 
-  // NetSuite Integration Settings
+  // NetSuite Integration Settings (global fallback)
   netsuite: {
     enabled: process.env.NETSUITE_ENABLED === 'true',
     restletUrl: process.env.NETSUITE_RESTLET_URL,
@@ -70,8 +101,14 @@ const CONFIG = {
     consumerKey: process.env.NETSUITE_CONSUMER_KEY,
     consumerSecret: process.env.NETSUITE_CONSUMER_SECRET,
     tokenId: process.env.NETSUITE_TOKEN_ID,
-    tokenSecret: process.env.NETSUITE_TOKEN_SECRET
-  }
+    tokenSecret: process.env.NETSUITE_TOKEN_SECRET,
+    // Default fallback folder IDs
+    defaultPdfFolderId: process.env.NETSUITE_PDF_FOLDER_ID,
+    defaultJsonFolderId: process.env.NETSUITE_JSON_FOLDER_ID
+  },
+
+  // Email processors
+  processors: EMAIL_PROCESSORS
 };
 
 // Initialize Claude API client
@@ -99,6 +136,40 @@ function validateConfig() {
   }
 
   console.log('✓ Configuration validated');
+  
+  // Log enabled processors
+  const enabledProcessors = CONFIG.processors.filter(p => p.enabled);
+  if (enabledProcessors.length > 0) {
+    console.log(`✓ ${enabledProcessors.length} email processor(s) enabled:`);
+    enabledProcessors.forEach(p => {
+      console.log(`   - ${p.name}: FROM "${p.criteria.from}" + SUBJECT contains "${p.criteria.subjectContains}"`);
+    });
+  }
+}
+
+/**
+ * Match email against processor rules
+ * @param {Object} email - Parsed email object with from/subject
+ * @returns {Object|null} Matching processor or null
+ */
+function matchEmailProcessor(email) {
+  const fromAddress = email.from?.text?.toLowerCase() || email.from?.value?.[0]?.address?.toLowerCase() || '';
+  const subject = email.subject || '';
+  
+  for (const processor of CONFIG.processors) {
+    if (!processor.enabled) continue;
+    
+    const fromMatches = fromAddress.includes(processor.criteria.from.toLowerCase());
+    const subjectMatches = subject.includes(processor.criteria.subjectContains);
+    
+    if (fromMatches && subjectMatches) {
+      console.log(`  ✓ Matched processor: ${processor.name}`);
+      return processor;
+    }
+  }
+  
+  console.log(`  ⚠️  No matching processor for FROM: ${fromAddress}, SUBJECT: ${subject}`);
+  return null;
 }
 
 /**
@@ -269,7 +340,7 @@ async function saveResult(result) {
 /**
  * Uploads PDF and extracted data to NetSuite via RESTlet
  */
-async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject) {
+async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject, folderIds = null) {
   if (!CONFIG.netsuite.enabled) {
     console.log('  ℹ️  NetSuite upload disabled (set NETSUITE_ENABLED=true to enable)');
     return { success: false, reason: 'disabled' };
@@ -277,6 +348,17 @@ async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject
 
   try {
     console.log('  📤 Uploading to NetSuite RESTlet...');
+
+    // Use processor-specific folder IDs or fall back to defaults
+    const pdfFolderId = folderIds?.pdfFolderId || CONFIG.netsuite.defaultPdfFolderId;
+    const jsonFolderId = folderIds?.jsonFolderId || CONFIG.netsuite.defaultJsonFolderId;
+    
+    if (pdfFolderId) {
+      console.log(`    PDF Folder ID: ${pdfFolderId}`);
+    }
+    if (jsonFolderId) {
+      console.log(`    JSON Folder ID: ${jsonFolderId}`);
+    }
 
     // Create OAuth 1.0a signature
     const oauth = OAuth({
@@ -306,13 +388,15 @@ async function uploadToNetSuite(pdfBuffer, filename, extractedData, emailSubject
     const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
     authHeader.Authorization += ', realm="' + CONFIG.netsuite.accountId + '"';
 
-    // Prepare payload
+    // Prepare payload with folder IDs
     const payload = {
       pdfBase64: pdfBuffer.toString('base64'),
       pdfFilename: filename,
       emailSubject: emailSubject,
       extractedData: extractedData,
-      processedDate: new Date().toISOString()
+      processedDate: new Date().toISOString(),
+      pdfFolderId: pdfFolderId,
+      jsonFolderId: jsonFolderId
     };
 
     // Send to NetSuite
@@ -370,6 +454,14 @@ async function processEmail(seqno, imap) {
           console.log(`  From: ${parsed.from?.text || 'Unknown'}`);
           console.log(`  Subject: ${parsed.subject || 'No Subject'}`);
           console.log(`  Date: ${parsed.date || 'Unknown'}`);
+
+          // Match email against processor rules
+          const processor = matchEmailProcessor(parsed);
+          
+          if (!processor) {
+            console.log('  ⏭️  Skipping - no matching processor for this email');
+            return;
+          }
 
           // Check for PDF attachments
           if (!parsed.attachments || parsed.attachments.length === 0) {
@@ -445,7 +537,8 @@ async function processEmail(seqno, imap) {
                     pdf.content,
                     pdf.filename,
                     extractedData,
-                    parsed.subject || 'No Subject'
+                    parsed.subject || 'No Subject',
+                    processor.netsuite // Pass folder IDs from matched processor
                   );
                 }
                 

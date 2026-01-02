@@ -32,7 +32,9 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime'], function(file, log, encode,
      *   pdfFilename: "marcone_67718694.pdf",
      *   emailSubject: "Credit Memo from Marcone",
      *   extractedData: { invoiceNumber: "67718694", ... },
-     *   processedDate: "2026-01-01T12:00:00.000Z"
+     *   processedDate: "2026-01-01T12:00:00.000Z",
+     *   pdfFolderId: "12345" (optional - overrides script parameter),
+     *   jsonFolderId: "12346" (optional - overrides script parameter)
      * }
      */
     function post(requestBody) {
@@ -41,23 +43,33 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime'], function(file, log, encode,
         try {
             log.audit('RESTlet Invoked', 'Received PDF upload request');
             
-            // Get script parameters
+            // Get script parameters (fallback defaults)
             var script = runtime.getCurrentScript();
-            var pdfFolderId = script.getParameter({
+            var defaultPdfFolderId = script.getParameter({
                 name: 'custscript_marcone_pdf_folder'
             });
-            var jsonFolderId = script.getParameter({
+            var defaultJsonFolderId = script.getParameter({
                 name: 'custscript_marcone_json_folder'
             });
+            
+            // Use folder IDs from request payload OR fall back to script parameters
+            var pdfFolderId = requestBody.pdfFolderId || defaultPdfFolderId;
+            var jsonFolderId = requestBody.jsonFolderId || defaultJsonFolderId;
             
             // Validate parameters
             if (!pdfFolderId || !jsonFolderId) {
                 log.error('Missing Configuration', 'PDF or JSON folder ID not configured');
                 return {
                     success: false,
-                    error: 'Script parameters not configured. Set custscript_marcone_pdf_folder and custscript_marcone_json_folder'
+                    error: 'Folder IDs not provided. Set pdfFolderId/jsonFolderId in request or configure script parameters'
                 };
             }
+            
+            log.audit('Folder Configuration', {
+                pdfFolderId: pdfFolderId,
+                jsonFolderId: jsonFolderId,
+                source: requestBody.pdfFolderId ? 'request payload' : 'script parameters'
+            });
             
             // Validate request body
             if (!requestBody || !requestBody.pdfBase64 || !requestBody.pdfFilename) {
