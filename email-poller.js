@@ -27,8 +27,9 @@ const OAuth = require('oauth-1.0a');
 const crypto = require('crypto');
 const axios = require('axios');
 
-// Email Processor Rules - Define different email types and their routing
-const EMAIL_PROCESSORS = [
+// Email Processor Rules - Loaded dynamically from NetSuite (or fallback to hardcoded)
+// Will be populated by fetchNetSuiteConfigs() on startup and every 10 minutes
+let EMAIL_PROCESSORS = [
   {
     name: 'marcone_credits',
     enabled: process.env.MARCONE_ENABLED !== 'false',
@@ -42,20 +43,7 @@ const EMAIL_PROCESSORS = [
     },
     claudePrompt: 'marcone' // Special identifier for Marcone prompt
   }
-  // Add more processors here:
-  // {
-  //   name: 'vendor_invoices',
-  //   enabled: process.env.VENDOR_ENABLED === 'true',
-  //   criteria: {
-  //     from: 'vendor@example.com',
-  //     subjectContains: 'Invoice'
-  //   },
-  //   netsuite: {
-  //     pdfFolderId: process.env.VENDOR_PDF_FOLDER_ID,
-  //     jsonFolderId: process.env.VENDOR_JSON_FOLDER_ID
-  //   },
-  //   claudePrompt: 'vendor_invoice'
-  // }
+  // More processors will be loaded from NetSuite AP Assist Vendor Configuration records
 ];
 
 // Configuration from environment variables
@@ -144,6 +132,95 @@ function validateConfig() {
     enabledProcessors.forEach(p => {
       console.log(`   - ${p.name}: FROM "${p.criteria.from}" + SUBJECT contains "${p.criteria.subjectContains}"`);
     });
+  }
+}
+
+/**
+ * Fetch AP Assist processor configurations from NetSuite
+ * Updates EMAIL_PROCESSORS array dynamically
+ */
+async function fetchNetSuiteConfigs() {
+  if (!CONFIG.netsuite.enabled || !CONFIG.netsuite.restletUrl) {
+    console.log('⚠️  NetSuite config fetching disabled (NETSUITE_ENABLED=false or no RESTLET_URL)');
+    return;
+  }
+
+  try {
+    console.log('🔄 Fetching processor configs from NetSuite...');
+
+    // Create OAuth signature for GET request
+    const oauth = OAuth({
+      consumer: {
+        key: CONFIG.netsuite.consumerKey,
+        secret: CONFIG.netsuite.consumerSecret
+      },
+      signature_method: 'HMAC-SHA256',
+      hash_function(base_string, key) {
+        return crypto.createHmac('sha256', key).update(base_string).digest('base64');
+      }
+    });
+
+    const token = {
+      key: CONFIG.netsuite.tokenId,
+      secret: CONFIG.netsuite.tokenSecret
+    };
+
+    const requestData = {
+      url: CONFIG.netsuite.restletUrl + '?action=configs',
+      method: 'GET'
+    };
+
+    const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
+    authHeader.Authorization += ',realm="' + CONFIG.netsuite.accountId + '"';
+
+    // Make GET request to fetch configs
+    const response = await axios.get(requestData.url, {
+      headers: {
+        'Authorization': authHeader.Authorization,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.data.success && response.data.configs && response.data.configs.length > 0) {
+      // Convert NetSuite configs to EMAIL_PROCESSORS format
+      const newProcessors = response.data.configs.map(config => ({
+        name: config.displayName.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+        enabled: true,
+        criteria: {
+          from: config.emailFrom,
+          subjectContains: config.emailSubjectContains
+        },
+        netsuite: {
+          pdfFolderId: config.pdfFolderId,
+          jsonFolderId: config.jsonFolderId
+        },
+        claudePrompt: config.claudePrompt || 'marcone', // Use custom prompt or fallback
+        configId: config.id,
+        vendor: config.vendor,
+        transactionType: config.transactionType
+      }));
+
+      // Update global EMAIL_PROCESSORS array
+      EMAIL_PROCESSORS = newProcessors;
+      CONFIG.processors = EMAIL_PROCESSORS;
+
+      console.log('✅ Loaded ' + newProcessors.length + ' processor config(s) from NetSuite:');
+      newProcessors.forEach(p => {
+        console.log('   - ' + p.name + ': FROM "' + p.criteria.from + '" + SUBJECT contains "' + p.criteria.subjectContains + '"');
+        if (p.claudePrompt && p.claudePrompt !== 'marcone') {
+          console.log('     └─ Custom Claude prompt: ' + p.claudePrompt.substring(0, 50) + '...');
+        }
+      });
+    } else {
+      console.log('⚠️  No enabled processor configs found in NetSuite, using hardcoded defaults');
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch NetSuite configs:', error.message);
+    if (error.response) {
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', JSON.stringify(error.response.data, null, 2));
+    }
+    console.log('   → Continuing with existing processor configurations');
   }
 }
 
@@ -767,11 +844,25 @@ async function startPolling() {
   console.log(`   IMAP User: ${CONFIG.imap.user}`);
   console.log(`   Mailbox: ${CONFIG.polling.mailbox}`);
   console.log(`   Search: ${CONFIG.polling.searchCriteria}`);
-  console.log(`   Poll Interval: ${CONFIG.polling.intervalMs}ms`);
+  console.log(`   Poll Interval: ${CONFIG.polling.intervalMs}ms (emails)`);
+  console.log(`   Config Sync Interval: 600000ms (10 min)`);
   console.log(`   Mark as Read: ${CONFIG.polling.markAsRead}`);
   console.log(`   Claude Model: ${CONFIG.claude.model}`);
   console.log(`   Save PDFs: ${CONFIG.output.saveProcessedPdfs}`);
   console.log(`   Save Results: ${CONFIG.output.saveResults}`);
+  console.log(`   NetSuite Integration: ${CONFIG.netsuite.enabled ? 'ENABLED' : 'DISABLED'}`);
+
+  // Fetch initial processor configs from NetSuite
+  await fetchNetSuiteConfigs();
+
+  // Set up config refresh every 10 minutes (600000ms)
+  if (CONFIG.netsuite.enabled) {
+    setInterval(() => {
+      fetchNetSuiteConfigs().catch(error => {
+        console.error('Error fetching configs:', error.message);
+      });
+    }, 600000); // 10 minutes
+  }
 
   const imap = new Imap(CONFIG.imap);
 
