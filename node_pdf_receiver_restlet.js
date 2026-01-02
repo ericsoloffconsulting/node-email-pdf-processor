@@ -21,7 +21,7 @@
  * - custscript_marcone_json_folder (File Cabinet folder for JSON)
  */
 
-define(['N/file', 'N/log', 'N/encode', 'N/runtime'], function(file, log, encode, runtime) {
+define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, log, encode, runtime, search) {
     
     /**
      * POST handler - receives PDF + extracted data from Node.js
@@ -166,28 +166,122 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime'], function(file, log, encode,
     }
     
     /**
-     * GET handler - for testing/health check
+     * GET handler - returns AP Assist processor configurations
+     * 
+     * Query parameter options:
+     * - action=health (health check - default behavior)
+     * - action=configs (returns all enabled processor configs)
+     * 
+     * Example: GET https://restlet-url?action=configs
      */
     function get(requestParams) {
-        log.audit('Health Check', 'GET request received');
-        
         var script = runtime.getCurrentScript();
-        var pdfFolderId = script.getParameter({
-            name: 'custscript_marcone_pdf_folder'
-        });
-        var jsonFolderId = script.getParameter({
-            name: 'custscript_marcone_json_folder'
-        });
+        var action = requestParams.action || 'health';
         
+        // Health check endpoint
+        if (action === 'health') {
+            log.audit('Health Check', 'GET request received');
+            
+            var pdfFolderId = script.getParameter({
+                name: 'custscript_marcone_pdf_folder'
+            });
+            var jsonFolderId = script.getParameter({
+                name: 'custscript_marcone_json_folder'
+            });
+            
+            return {
+                status: 'active',
+                scriptId: script.id,
+                deploymentId: script.deploymentId,
+                configuration: {
+                    pdfFolder: pdfFolderId || 'NOT CONFIGURED',
+                    jsonFolder: jsonFolderId || 'NOT CONFIGURED'
+                },
+                message: 'AP Assist RESTlet is active. Use POST to upload files or GET with action=configs to retrieve processor configurations.'
+            };
+        }
+        
+        // Fetch processor configurations
+        if (action === 'configs') {
+            try {
+                log.audit('Fetching Configs', 'Querying AP Assist Vendor Configuration records');
+                
+                var configs = [];
+                
+                // Search for enabled processor configs
+                var configSearch = search.create({
+                    type: 'customrecord_ap_assist_vend_config',
+                    filters: [
+                        ['custrecord_ap_assist_vend_enabled', 'is', 'T']
+                    ],
+                    columns: [
+                        'internalid',
+                        'custrecord_ap_assist_vendor',
+                        'custrecord_ap_assist_transaction_type',
+                        'custrecord_ap_assist_email_address',
+                        'custrecord_ap_assist_email_subject',
+                        'custrecord_ap_assist_ai_prompt',
+                        'custrecord_ap_asssist_pdf_folder_id',
+                        'custrecord_ap_assist_json_folder_id'
+                    ]
+                });
+                
+                configSearch.run().each(function(result) {
+                    var vendorId = result.getValue('custrecord_ap_assist_vendor');
+                    var vendorName = result.getText('custrecord_ap_assist_vendor');
+                    var transactionTypeId = result.getValue('custrecord_ap_assist_transaction_type');
+                    var transactionTypeName = result.getText('custrecord_ap_assist_transaction_type');
+                    var emailAddress = result.getValue('custrecord_ap_assist_email_address');
+                    var emailSubject = result.getValue('custrecord_ap_assist_email_subject');
+                    var aiPrompt = result.getValue('custrecord_ap_assist_ai_prompt');
+                    var pdfFolderId = result.getValue('custrecord_ap_asssist_pdf_folder_id');
+                    var jsonFolderId = result.getValue('custrecord_ap_assist_json_folder_id');
+                    
+                    configs.push({
+                        id: result.id,
+                        vendor: {
+                            id: vendorId,
+                            name: vendorName
+                        },
+                        transactionType: {
+                            id: transactionTypeId,
+                            name: transactionTypeName
+                        },
+                        emailFrom: emailAddress,
+                        emailSubjectContains: emailSubject,
+                        claudePrompt: aiPrompt || null,
+                        pdfFolderId: pdfFolderId,
+                        jsonFolderId: jsonFolderId,
+                        displayName: vendorName + ' - ' + transactionTypeName
+                    });
+                    
+                    return true; // Continue iteration
+                });
+                
+                log.audit('Configs Retrieved', 'Found ' + configs.length + ' enabled processor(s)');
+                
+                return {
+                    success: true,
+                    count: configs.length,
+                    configs: configs,
+                    timestamp: new Date().toISOString()
+                };
+                
+            } catch (e) {
+                log.error('Config Fetch Error', e.toString());
+                return {
+                    success: false,
+                    error: e.toString(),
+                    message: 'Failed to retrieve processor configurations'
+                };
+            }
+        }
+        
+        // Unknown action
         return {
-            status: 'active',
-            scriptId: script.id,
-            deploymentId: script.deploymentId,
-            configuration: {
-                pdfFolder: pdfFolderId || 'NOT CONFIGURED',
-                jsonFolder: jsonFolderId || 'NOT CONFIGURED'
-            },
-            message: 'Marcone PDF Receiver RESTlet is active. Use POST to upload files.'
+            success: false,
+            error: 'Unknown action: ' + action,
+            message: 'Valid actions: health, configs'
         };
     }
     

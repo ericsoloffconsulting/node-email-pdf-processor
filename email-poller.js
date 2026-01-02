@@ -173,6 +173,45 @@ function matchEmailProcessor(email) {
 }
 
 /**
+ * Validates that all line items have 8-digit original bill numbers
+ */
+function validateBillNumbers(extractedData) {
+  if (!extractedData || !extractedData.lineItems || !Array.isArray(extractedData.lineItems)) {
+    return { valid: true }; // No line items to validate
+  }
+
+  const invalidItems = [];
+  
+  for (let i = 0; i < extractedData.lineItems.length; i++) {
+    const item = extractedData.lineItems[i];
+    const billNumber = item.originalBillNumber;
+    
+    if (!billNumber || billNumber.length !== 8 || !/^\d{8}$/.test(billNumber)) {
+      invalidItems.push({
+        index: i,
+        narda: item.nardaNumber,
+        billNumber: billNumber || '(empty)',
+        length: billNumber ? billNumber.length : 0
+      });
+    }
+  }
+
+  if (invalidItems.length > 0) {
+    const details = invalidItems.map(item => 
+      `Line ${item.index + 1} (NARDA: ${item.narda}): "${item.billNumber}" is ${item.length} digits (need 8)`
+    ).join('; ');
+    
+    return {
+      valid: false,
+      reason: `Invalid bill numbers found: ${details}`,
+      invalidItems
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Processes a PDF with Claude API
  *
  * @param {Buffer} pdfBuffer - PDF file as buffer
@@ -229,7 +268,7 @@ EXTRACT FROM PDF:
    • Bill Number: EMBEDDED IN PRODUCT DESCRIPTION - REQUIRED FOR ALL CREDITS
      * SEARCH for capital letter N or W followed immediately by consecutive digits
      * Pattern can appear ANYWHERE in the description text, even in middle of words
-     * Extract ONLY the 7-8 digits (exclude the N or W prefix)
+     * Extract ONLY the 8 digits (exclude the N or W prefix)
      * Examples: 
        - "BURNRHEAN66811026" → extract "66811026" (not N66811026)
        - "GLASS-DOOW91738138" → extract "91738138" (not W91738138)
@@ -238,16 +277,15 @@ EXTRACT FROM PDF:
        - "BUCKEN69221189" → extract "69221189"
        - "DUAN69221189" → extract "69221189"
        - "CONFIGUREW699863" + next line "15" → extract "69986315" (8 digits total)
-     * CRITICAL: Bill numbers are ALWAYS exactly 7-8 digits total
-     * MULTI-LINE RULE: If you find N or W with LESS than 7 digits, YOU MUST check the next line
-     * Concatenate digits from next line until you have exactly 7-8 total digits
+     * CRITICAL: Bill numbers are ALWAYS EXACTLY 8 digits (not 7, not 9 - must be 8)
+     * MULTI-LINE RULE: If you find N or W with LESS than 8 digits, YOU MUST check the next line
+     * Concatenate digits from next line until you have exactly 8 total digits
      * Example multi-line patterns:
        - "REGULATORN668110" (6 digits) + "26" = extract "66811026" (8 digits)
        - "CONFIGUREW699863" (6 digits) + "15" = extract "69986315" (8 digits)
-       - "ITEMW1234567" (7 digits complete) = extract "1234567" (no need for next line)
-     * DO NOT return partial bill numbers with only 5-6 digits
-     * EVERY credit memo line MUST have a bill number - search thoroughly in description AND next line
-     * Only leave empty if absolutely no N/W + 7-8 digits exists anywhere after checking both lines
+     * DO NOT return partial bill numbers with only 5-7 digits
+     * EVERY credit memo line MUST have an 8-digit bill number - search thoroughly in description AND next line
+     * Only leave empty if absolutely no N/W + 8 digits exists anywhere after checking both lines
    • Sales Order Number: Look below product description for "SOASER" followed by digits
      Extract the FULL value including prefix (e.g., "SOASER12345" → "SOASER12345")
      Leave empty string if not found
@@ -539,6 +577,46 @@ async function processEmail(seqno, imap) {
                   }
                   extractedData = JSON.parse(jsonStr);
                   console.log(`  ✓ Parsed: Invoice ${extractedData.invoiceNumber || 'N/A'}`);
+                  
+                  // Validate original bill numbers are 8 digits
+                  const validationResult = validateBillNumbers(extractedData);
+                  if (!validationResult.valid && retryCount === 0) {
+                    console.log(`  ⚠️  Bill number validation failed: ${validationResult.reason}`);
+                    console.log(`  🔄 Retrying with enhanced prompt (attempt 2/2)...`);
+                    
+                    // Retry once with enhanced prompt focusing on bill numbers
+                    const retryPrompt = `CRITICAL: Previous extraction had invalid bill numbers.\n\n${validationResult.reason}\n\nPlease re-analyze this PDF and extract EXACTLY 8-digit bill numbers for each line item.\nRemember: Bill numbers are embedded in the Description column (look for N or W followed by 8 digits).\nIf the number spans multiple lines, concatenate to get exactly 8 digits total.\n\nAll line items MUST have valid 8-digit original bill numbers.\n\n` + createExtractionPrompt(pdf.filename);
+                    
+                    const retryResult = await processPdfWithClaude(
+                      pdf.content,
+                      pdf.filename,
+                      parsed.subject || 'No Subject',
+                      retryPrompt
+                    );
+                    
+                    if (retryResult.success) {
+                      let retryJsonStr = retryResult.analysis;
+                      if (retryJsonStr.includes('```json')) {
+                        const startIdx = retryJsonStr.indexOf('```json') + 7;
+                        const endIdx = retryJsonStr.indexOf('```', startIdx);
+                        retryJsonStr = retryJsonStr.substring(startIdx, endIdx).trim();
+                      }
+                      const retryExtractedData = JSON.parse(retryJsonStr);
+                      const retryValidation = validateBillNumbers(retryExtractedData);
+                      
+                      if (retryValidation.valid) {
+                        console.log(`  ✓ Retry successful - all bill numbers are now 8 digits`);
+                        extractedData = retryExtractedData;
+                      } else {
+                        console.log(`  ⚠️  Retry still has invalid bill numbers: ${retryValidation.reason}`);
+                        console.log(`  → Proceeding with original extraction`);
+                      }
+                    }
+                  } else if (!validationResult.valid) {
+                    console.log(`  ⚠️  Bill number validation failed: ${validationResult.reason}`);
+                    console.log(`  → Max retries reached, proceeding with current data`);
+                  }
+                  
                 } catch (e) {
                   console.error(`  ⚠️  Could not parse JSON from Claude response:`, e.message);
                 }
