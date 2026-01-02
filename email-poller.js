@@ -633,11 +633,12 @@ async function processEmail(seqno, imap) {
               // Save PDF if configured
               await savePdf(pdf.content, pdf.filename, parsed.subject);
 
-              // Process with Claude
+              // Process with Claude using processor's custom prompt
               const result = await processPdfWithClaude(
                 pdf.content,
                 pdf.filename,
-                parsed.subject || 'No Subject'
+                parsed.subject || 'No Subject',
+                processor.claudePrompt // Use NetSuite prompt if available
               );
 
               if (result.success) {
