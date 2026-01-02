@@ -166,7 +166,7 @@ async function fetchNetSuiteConfigs() {
     };
 
     const requestData = {
-      url: CONFIG.netsuite.restletUrl + '?action=configs',
+      url: CONFIG.netsuite.restletUrl + '&action=configs',
       method: 'GET'
     };
 
