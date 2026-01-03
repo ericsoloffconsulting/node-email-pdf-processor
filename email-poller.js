@@ -712,7 +712,8 @@ async function processEmail(seqno, imap) {
                 // Save result
                 await saveResult({
                   ...result,
-                  exrenamedFilename, // Use renamed filename with invoice number
+                  extractedData,
+                  renamedFilename,
                   emailFrom: parsed.from?.text,
                   emailDate: parsed.date,
                   processedAt: new Date().toISOString()
@@ -722,7 +723,7 @@ async function processEmail(seqno, imap) {
                 if (extractedData) {
                   await uploadToNetSuite(
                     pdf.content,
-                    pdf.filename,
+                    renamedFilename, // Use renamed filename with invoice number
                     extractedData,
                     parsed.subject || 'No Subject',
                     processor.netsuite // Pass folder IDs from matched processor
