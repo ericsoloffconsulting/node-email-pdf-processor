@@ -112,7 +112,7 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
             var jsonFileId = null;
             if (requestBody.extractedData) {
                 var jsonContent = JSON.stringify(requestBody.extractedData, null, 2);
-                var jsonFilename = timestamp + '_' + baseName + '.json';
+                var jsonFilename = baseName + '.json';
                 
                 var jsonFile = file.create({
                     name: jsonFilename,
