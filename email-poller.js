@@ -300,89 +300,28 @@ function validateBillNumbers(extractedData) {
 async function processPdfWithClaude(pdfBuffer, filename, emailSubject, customPrompt = null) {
   console.log(`  📄 Processing PDF with Claude: ${filename} (${(pdfBuffer.length / 1024).toFixed(2)} KB)`);
 
+  // CRITICAL: Prompt must be provided from NetSuite configuration
+  if (!customPrompt) {
+    console.error('❌ CRITICAL ERROR: No Claude prompt provided for processing!');
+    console.error('   File:', filename);
+    console.error('   This PDF cannot be processed without a valid prompt.');
+    console.error('   Check NetSuite AP Assist Vendor Configuration record.');
+    return {
+      success: false,
+      error: 'NO_PROMPT_CONFIGURED',
+      message: 'Claude prompt is missing from processor configuration. Update NetSuite AP Assist Vendor Configuration record.',
+      filename,
+      emailSubject
+    };
+  }
+
   // Convert PDF to base64
   const pdfBase64 = pdfBuffer.toString('base64');
 
-  // Marcone-specific extraction prompt - Validated 100% accuracy on 67+ test PDFs
-  const prompt = customPrompt || `MARCONE CREDIT MEMO EXTRACTION
+  // Use prompt from NetSuite configuration
+  const prompt = customPrompt + `\n\nDocument: ${filename}`;
 
-STEP 1: DOCUMENT TYPE DETECTION
-=================================
-Check the top right corner for these phrases:
-  - "WARRANTY CREDIT"
-  - "RETURN CREDIT" 
-  - "CREDIT MEMO"
-
-If found: This is a CREDIT MEMO - proceed with extraction
-If NOT found: Set isCreditMemo=false, skip line items, return error message
-
-VALID NARDA PATTERNS - Extract if matches:
-✓ CONCDA, CONCDAM, CONCESSION, NF, CORE (vendor credits)
-✓ J followed by ANY characters (J17052, J1234, etc.) - If it starts with capital J in the NARDA column, it's VALID
-✓ INV###### (INV followed by 6+ digits)
-✓ SHORT, BOX
-✗ Part numbers, manufacturer codes (BSH, GEH, WPL, SPE)
-
-EXTRACT FROM PDF:
-1. isCreditMemo: true/false (based on WARRANTY CREDIT, RETURN CREDIT, or CREDIT MEMO text presence)
-2. Credit Type: Extract EXACT text from top right header - will be either "Warranty Credit" or "Return Credit"
-   Leave empty string if neither found
-3. Invoice Number: 8-digit number at top left
-4. Invoice Date: MM/DD/YYYY format
-5. PO Number: Look in top right corner area, labeled as "P.O. Number" or "PO#" (may be empty/blank)
-6. Delivery Amount: Dollar amount with $ symbol (from delivery line)
-7. Document Total: Grand total at bottom (e.g., "($136.68)" or "$0.00")
-8. Line Items - ONLY IF isCreditMemo=true, for EACH line with valid NARDA:
-   • NARDA Number: Pattern above, remove spaces ("CONCDA M" → "CONCDAM", "N F" → "NF")
-   • Total Amount: With ( ) and $ (e.g., "($42.24)")
-   • Part Number: From "Part Number" column, on SAME ROW as Total Amount
-     * Located between "Make" column and "Description" column
-     * Typically format: letters + numbers (e.g., "WR49X10322", "W11416362", "WR57X10098")
-     * MUST be on the SAME ROW/LINE as the Total Amount for this line item
-     * DO NOT extract text like "REF:" that appears below line items (not aligned with Total)
-     * If Part Number appears on next line below its Total, skip - only extract when on same row
-     * Leave empty string if no part number on same row as Total Amount
-   • Bill Number: EMBEDDED IN PRODUCT DESCRIPTION - REQUIRED FOR ALL CREDITS
-     * SEARCH for capital letter N or W followed immediately by consecutive digits
-     * Pattern can appear ANYWHERE in the description text, even in middle of words
-     * Extract ONLY the 8 digits (exclude the N or W prefix)
-     * Examples: 
-       - "BURNRHEAN66811026" → extract "66811026" (not N66811026)
-       - "GLASS-DOOW91738138" → extract "91738138" (not W91738138)
-       - "MOTOW70174252" → extract "70174252" (not W70174252)
-       - "PUMPN12345678DESC" → extract "12345678" (not N12345678)
-       - "BUCKEN69221189" → extract "69221189"
-       - "DUAN69221189" → extract "69221189"
-       - "CONFIGUREW699863" + next line "15" → extract "69986315" (8 digits total)
-     * CRITICAL: Bill numbers are ALWAYS EXACTLY 8 digits (not 7, not 9 - must be 8)
-     * MULTI-LINE RULE: If you find N or W with LESS than 8 digits, YOU MUST check the next line
-     * Concatenate digits from next line until you have exactly 8 total digits
-     * Example multi-line patterns:
-       - "REGULATORN668110" (6 digits) + "26" = extract "66811026" (8 digits)
-       - "CONFIGUREW699863" (6 digits) + "15" = extract "69986315" (8 digits)
-     * DO NOT return partial bill numbers with only 5-7 digits
-     * EVERY credit memo line MUST have an 8-digit bill number - search thoroughly in description AND next line
-     * Only leave empty if absolutely no N/W + 8 digits exists anywhere after checking both lines
-   • Sales Order Number: Look below product description for "SOASER" followed by digits
-     Extract the FULL value including prefix (e.g., "SOASER12345" → "SOASER12345")
-     Leave empty string if not found
-
-CRITICAL RULES:
-• NARDA column is BETWEEN description and part number - NOT the "Make" column
-• DO NOT extract manufacturer codes (BSH, GEH, WPL, SPE) as NARDA values
-• For J pattern: ANY value starting with capital J in NARDA column is valid (J17052, J1234, J123456, etc.)
-• Bill numbers are EMBEDDED in description text, not in separate column
-• Description may wrap to next line - concatenate lines to find complete bill number
-• Focus on the letter N or W as the START of the bill number pattern
-• Include J##### patterns - these are valid journal entries (may have no bill number)
-• Document Total MUST equal: sum(line item totals) + delivery amount
-• If isCreditMemo=false, return empty lineItems array with validationError
-• Output ONLY valid JSON, no explanations
-
-EXAMPLE OUTPUT:
-{"isCreditMemo":true,"creditType":"Warranty Credit","invoiceNumber":"67718510","invoiceDate":"09/11/2025","poNumber":"12345","deliveryAmount":"$0.00","documentTotal":"($94.58)","lineItems":[{"nardaNumber":"NF","partNumber":"WR49X10322","totalAmount":"($94.58)","originalBillNumber":"66811026","salesOrderNumber":"SOASER15386"}],"validationError":""}
-
-Document: ${filename}`;
+  console.log(`  ✓ Using Claude prompt from NetSuite configuration (${customPrompt.length} characters)`);
 
   try {
     // Create message with PDF attachment
