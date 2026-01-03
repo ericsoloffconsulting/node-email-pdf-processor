@@ -28,8 +28,12 @@ const crypto = require('crypto');
 const axios = require('axios');
 
 // Log SDK version on startup to verify Railway deployment
-const anthropicPackage = require('@anthropic-ai/sdk/package.json');
-console.log('🔍 @anthropic-ai/sdk version:', anthropicPackage.version);
+try {
+  const anthropicPackage = require(path.join(__dirname, 'node_modules', '@anthropic-ai', 'sdk', 'package.json'));
+  console.log('🔍 @anthropic-ai/sdk version:', anthropicPackage.version);
+} catch (err) {
+  console.log('⚠️ Could not read SDK version:', err.message);
+}
 
 // Email Processor Rules - Loaded dynamically from NetSuite (or fallback to hardcoded)
 // Will be populated by fetchNetSuiteConfigs() on startup and every 10 minutes
