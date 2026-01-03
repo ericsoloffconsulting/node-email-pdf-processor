@@ -61,7 +61,7 @@ const CONFIG = {
   // Claude API Settings
   claude: {
     apiKey: process.env.ANTHROPIC_API_KEY,
-    model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001',
+    model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001', // Supports prompt caching
     maxTokens: parseInt(process.env.CLAUDE_MAX_TOKENS || '4096')
   },
 
@@ -318,14 +318,13 @@ async function processPdfWithClaude(pdfBuffer, filename, emailSubject, customPro
   // Convert PDF to base64
   const pdfBase64 = pdfBuffer.toString('base64');
 
-  // Use prompt from NetSuite configuration
-  const prompt = customPrompt + `\n\nDocument: ${filename}`;
-
+  // Use prompt from NetSuite configuration (keep static for caching)
   console.log(`  ✓ Using Claude prompt from NetSuite configuration (${customPrompt.length} characters)`);
 
   try {
-    // Create message with PDF attachment
-    // Claude API supports PDFs natively - no need to convert to JSON!
+    // Create message with prompt caching enabled
+    // IMPORTANT: Static prompt comes FIRST and is marked for caching
+    // This saves ~90% on prompt tokens for repeated processing!
     const message = await anthropic.messages.create({
       model: CONFIG.claude.model,
       max_tokens: CONFIG.claude.maxTokens,
@@ -334,16 +333,21 @@ async function processPdfWithClaude(pdfBuffer, filename, emailSubject, customPro
           role: 'user',
           content: [
             {
+              type: 'text',
+              text: customPrompt,
+              cache_control: { type: 'ephemeral' }  // Cache this prompt!
+            },
+            {
+              type: 'text',
+              text: '\n\nDocument: ' + filename
+            },
+            {
               type: 'document',
               source: {
                 type: 'base64',
                 media_type: 'application/pdf',
                 data: pdfBase64
               }
-            },
-            {
-              type: 'text',
-              text: prompt
             }
           ]
         }
@@ -356,7 +360,12 @@ async function processPdfWithClaude(pdfBuffer, filename, emailSubject, customPro
       .map(block => block.text)
       .join('\n');
 
-    console.log(`  ✓ Analysis complete (${message.usage.input_tokens} in / ${message.usage.output_tokens} out tokens)`);
+    // Log token usage with cache stats
+    const cacheStats = message.usage.cache_creation_input_tokens || message.usage.cache_read_input_tokens 
+      ? ' | Cache: ' + (message.usage.cache_creation_input_tokens || 0) + ' created, ' + (message.usage.cache_read_input_tokens || 0) + ' read'
+      : '';
+    
+    console.log(`  ✓ Analysis complete (${message.usage.input_tokens} in / ${message.usage.output_tokens} out tokens${cacheStats})`);
 
     return {
       success: true,
@@ -555,10 +564,13 @@ async function processEmail(seqno, imap) {
 
           console.log(`  📎 Found ${pdfAttachments.length} PDF attachment(s)`);
 
-          // Process PDFs with batch concurrency (optimized for API rate limits)
-          const BATCH_SIZE = 3; // Process 3 PDFs concurrently (reduced to avoid rate limits)
-          const BATCH_DELAY_MS = 5000; // 5 second delay between batches
+          // Process PDFs with batch concurrency (optimized with prompt caching)
+          // NOTE: Prompt caching reduces token usage by ~90% after first PDF,
+          // allowing higher throughput without hitting rate limits
+          const BATCH_SIZE = 4; // Process 4 PDFs concurrently (safe with caching)
+          const BATCH_DELAY_MS = 6000; // 6 second delay between batches
           const RETRY_ATTEMPTS = 3; // Retry failed PDFs up to 3 times
+          const PER_PDF_DELAY_MS = 1000; // 1 second delay between individual PDFs
           let processedCount = 0;
           let successCount = 0;
           let failCount = 0;
@@ -566,6 +578,11 @@ async function processEmail(seqno, imap) {
           // Function to process a single PDF with retry logic
           const processSinglePdf = async (pdf, index, retryCount = 0) => {
             try {
+              // Small delay between PDFs to spread out API calls
+              if (index > 0 && retryCount === 0) {
+                await new Promise(resolve => setTimeout(resolve, PER_PDF_DELAY_MS));
+              }
+              
               console.log(`  [${index + 1}/${pdfAttachments.length}] Processing: ${pdf.filename}`);
 
               // Save PDF if configured
@@ -612,7 +629,7 @@ async function processEmail(seqno, imap) {
                     console.log(`  🔄 Retrying with enhanced prompt (attempt 2/2)...`);
                     
                     // Retry once with enhanced prompt focusing on bill numbers
-                    const retryPrompt = `CRITICAL: Previous extraction had invalid bill numbers.\n\n${validationResult.reason}\n\nPlease re-analyze this PDF and extract EXACTLY 8-digit bill numbers for each line item.\nRemember: Bill numbers are embedded in the Description column (look for N or W followed by 8 digits).\nIf the number spans multiple lines, concatenate to get exactly 8 digits total.\n\nAll line items MUST have valid 8-digit original bill numbers.\n\n` + createExtractionPrompt(pdf.filename);
+                    const retryPrompt = 'CRITICAL: Previous extraction had invalid bill numbers.\n\n' + validationResult.reason + '\n\nPlease re-analyze this PDF and extract EXACTLY 8-digit bill numbers for each line item.\nRemember: Bill numbers are embedded in the Description column (look for N or W followed by 8 digits).\nIf the number spans multiple lines, concatenate to get exactly 8 digits total.\n\nAll line items MUST have valid 8-digit original bill numbers.\n\n' + (processor.claudePrompt || '') + '\n\nDocument: ' + pdf.filename;
                     
                     const retryResult = await processPdfWithClaude(
                       pdf.content,
@@ -683,11 +700,12 @@ async function processEmail(seqno, imap) {
               }
             } catch (error) {
               // Check if it's a rate limit error and retry
-              const isRateLimitError = error.message && error.message.includes('rate_limit_error');
+              const isRateLimitError = error.message && (error.message.includes('rate_limit_error') || error.message.includes('429'));
               
               if (isRateLimitError && retryCount < RETRY_ATTEMPTS) {
-                const delaySeconds = Math.pow(2, retryCount) * 10; // Exponential backoff: 10s, 20s, 40s
+                const delaySeconds = Math.pow(2, retryCount + 1) * 15; // Exponential backoff: 30s, 60s, 120s
                 console.warn(`  ⏸️  Rate limit hit for ${pdf.filename}. Retrying in ${delaySeconds}s... (attempt ${retryCount + 1}/${RETRY_ATTEMPTS})`);
+                console.warn(`  💡 Tip: Consider reducing batch size or increasing delays if rate limits persist`);
                 await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
                 return processSinglePdf(pdf, index, retryCount + 1); // Retry
               }
