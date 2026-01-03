@@ -27,6 +27,10 @@ const OAuth = require('oauth-1.0a');
 const crypto = require('crypto');
 const axios = require('axios');
 
+// Log SDK version on startup to verify Railway deployment
+const anthropicPackage = require('@anthropic-ai/sdk/package.json');
+console.log('🔍 @anthropic-ai/sdk version:', anthropicPackage.version);
+
 // Email Processor Rules - Loaded dynamically from NetSuite (or fallback to hardcoded)
 // Will be populated by fetchNetSuiteConfigs() on startup and every 10 minutes
 let EMAIL_PROCESSORS = [
