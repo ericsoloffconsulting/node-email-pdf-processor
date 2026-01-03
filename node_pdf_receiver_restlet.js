@@ -228,7 +228,7 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
                             'custrecord_ap_assist_email_address',
                             'custrecord_ap_assist_email_subject',
                             'custrecord_ap_assist_ai_prompt',
-                            'custrecord_ap_asssist_pdf_folder_id',
+                            'custrecord_ap_assist_pdf_folder_id',
                             'custrecord_ap_assist_json_folder_id'
                         ]
                     });
@@ -272,7 +272,7 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
                     var emailAddress = result.getValue('custrecord_ap_assist_email_address');
                     var emailSubject = result.getValue('custrecord_ap_assist_email_subject');
                     var aiPrompt = result.getValue('custrecord_ap_assist_ai_prompt');
-                    var pdfFolderId = result.getValue('custrecord_ap_asssist_pdf_folder_id');
+                    var pdfFolderId = result.getValue('custrecord_ap_assist_pdf_folder_id');
                     var jsonFolderId = result.getValue('custrecord_ap_assist_json_folder_id');
                     
                     log.audit('Processing Config Record', {
