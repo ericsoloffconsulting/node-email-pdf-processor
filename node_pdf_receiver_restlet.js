@@ -86,10 +86,9 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
                 pdfSize: requestBody.pdfBase64.length
             });
             
-            // Create unique filename with timestamp
-            var timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            var baseName = requestBody.pdfFilename.replace(/\.pdf$/i, '');
-            var pdfFilename = timestamp + '_' + baseName + '.pdf';
+            // Use filename as provided (already includes invoice number from email-poller)
+            var pdfFilename = requestBody.pdfFilename;
+            var baseName = pdfFilename.replace(/\.pdf$/i, '');
             
             // Save PDF file directly from base64
             var pdfFile = file.create({
