@@ -645,6 +645,7 @@ async function processEmail(seqno, imap) {
 
                 // Parse JSON from Claude response
                 let extractedData = null;
+                let renamedFilename = pdf.filename; // Track potentially renamed filename
                 
                 try {
                   let jsonStr = result.analysis;
@@ -655,6 +656,15 @@ async function processEmail(seqno, imap) {
                   }
                   extractedData = JSON.parse(jsonStr);
                   console.log(`  ✓ Parsed JSON: Invoice ${extractedData.invoiceNumber || 'N/A'}`);
+                  
+                  // Rename PDF file to invoice number if available
+                  if (extractedData.invoiceNumber) {
+                    const originalExt = path.extname(pdf.filename);
+                    renamedFilename = extractedData.invoiceNumber + originalExt;
+                    console.log(`  ✓ Renamed PDF: ${pdf.filename} → ${renamedFilename}`);
+                  } else {
+                    console.log(`  ℹ️  No invoice number found, keeping original filename: ${pdf.filename}`);
+                  }
                   
                   // Validate original bill numbers are 8 digits
                   const validationResult = validateBillNumbers(extractedData);
@@ -702,7 +712,7 @@ async function processEmail(seqno, imap) {
                 // Save result
                 await saveResult({
                   ...result,
-                  extractedData,
+                  exrenamedFilename, // Use renamed filename with invoice number
                   emailFrom: parsed.from?.text,
                   emailDate: parsed.date,
                   processedAt: new Date().toISOString()
