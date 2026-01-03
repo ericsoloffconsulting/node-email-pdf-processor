@@ -61,7 +61,7 @@ const CONFIG = {
   // Claude API Settings
   claude: {
     apiKey: process.env.ANTHROPIC_API_KEY,
-    model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001', // Supports prompt caching
+    model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001', // Supports prompt caching NEW DEPLOY
     maxTokens: parseInt(process.env.CLAUDE_MAX_TOKENS || '4096')
   },
 
