@@ -204,28 +204,67 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
         if (action === 'configs') {
             try {
                 log.audit('Fetching Configs', 'Querying AP Assist Vendor Configuration records');
-                
-                var configs = [];
-                
-                // Search for enabled processor configs
-                var configSearch = search.create({
-                    type: 'customrecord_ap_assist_vend_config',
-                    filters: [
-                        ['custrecord_ap_assist_vend_enabled', 'is', 'T']
-                    ],
-                    columns: [
-                        'internalid',
-                        'custrecord_ap_assist_vendor',
-                        'custrecord_ap_assist_transaction_type',
-                        'custrecord_ap_assist_email_address',
-                        'custrecord_ap_assist_email_subject',
-                        'custrecord_ap_assist_ai_prompt',
-                        'custrecord_ap_asssist_pdf_folder_id',
-                        'custrecord_ap_assist_json_folder_id'
-                    ]
+                log.audit('Search Details', {
+                    recordType: 'customrecord_ap_assist_vend_config',
+                    filterField: 'custrecord_ap_assist_vend_enabled',
+                    filterValue: 'T'
                 });
                 
+                var configs = [];
+                var searchCreated = false;
+                var configSearch;
+                
+                // Try to create search with detailed error handling
+                try {
+                    configSearch = search.create({
+                        type: 'customrecord_ap_assist_vend_config',
+                        filters: [
+                            ['custrecord_ap_assist_vend_enabled', 'is', 'T']
+                        ],
+                        columns: [
+                            'internalid',
+                            'custrecord_ap_assist_vendor',
+                            'custrecord_ap_assist_transaction_type',
+                            'custrecord_ap_assist_email_address',
+                            'custrecord_ap_assist_email_subject',
+                            'custrecord_ap_assist_ai_prompt',
+                            'custrecord_ap_asssist_pdf_folder_id',
+                            'custrecord_ap_assist_json_folder_id'
+                        ]
+                    });
+                    searchCreated = true;
+                    log.audit('Search Created', 'Successfully created search object');
+                } catch (searchError) {
+                    log.error('Search Creation Failed', {
+                        error: searchError.toString(),
+                        message: searchError.message,
+                        name: searchError.name
+                    });
+                    return {
+                        success: false,
+                        error: 'Failed to create search: ' + searchError.toString(),
+                        message: 'Custom record type or fields may not exist. Check NetSuite customization.',
+                        details: {
+                            recordType: 'customrecord_ap_assist_vend_config',
+                            requiredFields: [
+                                'custrecord_ap_assist_vend_enabled',
+                                'custrecord_ap_assist_vendor',
+                                'custrecord_ap_assist_transaction_type',
+                                'custrecord_ap_assist_email_address',
+                                'custrecord_ap_assist_email_subject',
+                                'custrecord_ap_assist_ai_prompt',
+                                'custrecord_ap_asssist_pdf_folder_id',
+                                'custrecord_ap_assist_json_folder_id'
+                            ]
+                        }
+                    };
+                }
+                
+                // Run search and process results
+                var resultCount = 0;
                 configSearch.run().each(function(result) {
+                    resultCount++;
+                    
                     var vendorId = result.getValue('custrecord_ap_assist_vendor');
                     var vendorName = result.getText('custrecord_ap_assist_vendor');
                     var transactionTypeId = result.getValue('custrecord_ap_assist_transaction_type');
@@ -235,6 +274,14 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
                     var aiPrompt = result.getValue('custrecord_ap_assist_ai_prompt');
                     var pdfFolderId = result.getValue('custrecord_ap_asssist_pdf_folder_id');
                     var jsonFolderId = result.getValue('custrecord_ap_assist_json_folder_id');
+                    
+                    log.audit('Processing Config Record', {
+                        id: result.id,
+                        vendor: vendorName,
+                        emailFrom: emailAddress,
+                        hasPrompt: !!aiPrompt,
+                        promptLength: aiPrompt ? aiPrompt.length : 0
+                    });
                     
                     configs.push({
                         id: result.id,
@@ -257,7 +304,11 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
                     return true; // Continue iteration
                 });
                 
-                log.audit('Configs Retrieved', 'Found ' + configs.length + ' enabled processor(s)');
+                log.audit('Configs Retrieved', {
+                    totalRecordsFound: resultCount,
+                    configsReturned: configs.length,
+                    searchSuccessful: searchCreated
+                });
                 
                 return {
                     success: true,
@@ -267,11 +318,17 @@ define(['N/file', 'N/log', 'N/encode', 'N/runtime', 'N/search'], function(file, 
                 };
                 
             } catch (e) {
-                log.error('Config Fetch Error', e.toString());
+                log.error('Config Fetch Error', {
+                    error: e.toString(),
+                    message: e.message,
+                    name: e.name,
+                    stack: e.stack
+                });
                 return {
                     success: false,
                     error: e.toString(),
-                    message: 'Failed to retrieve processor configurations'
+                    message: 'Failed to retrieve processor configurations',
+                    details: e.message
                 };
             }
         }

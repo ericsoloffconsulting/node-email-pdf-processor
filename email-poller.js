@@ -189,6 +189,9 @@ async function fetchNetSuiteConfigs() {
       }
     });
 
+    // Log full response for debugging
+    console.log('📋 NetSuite response:', JSON.stringify(response.data, null, 2));
+    
     if (response.data.success && response.data.configs && response.data.configs.length > 0) {
       // Convert NetSuite configs to EMAIL_PROCESSORS format
       const newProcessors = response.data.configs.map(config => ({
@@ -220,7 +223,11 @@ async function fetchNetSuiteConfigs() {
         }
       });
     } else {
-      console.log('⚠️  No enabled processor configs found in NetSuite, using hardcoded defaults');
+      console.log('⚠️  No enabled processor configs found in NetSuite');
+      console.log('   Response success:', response.data.success);
+      console.log('   Configs array:', response.data.configs);
+      console.log('   Configs length:', response.data.configs?.length || 0);
+      console.log('   → Using hardcoded defaults');
     }
   } catch (error) {
     console.error('❌ Failed to fetch NetSuite configs:', error.message);

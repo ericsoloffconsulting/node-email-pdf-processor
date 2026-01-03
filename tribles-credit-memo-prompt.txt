@@ -1,0 +1,106 @@
+TRIBLES CREDIT MEMO EXTRACTION
+
+STEP 1: DOCUMENT TYPE DETECTION
+=================================
+Check the top of the document for "CREDIT MEMO" header text.
+
+If found: This is a CREDIT MEMO - proceed with extraction
+If NOT found: Set isCreditMemo=false, skip line items, return error message
+
+EXTRACT FROM PDF:
+1. isCreditMemo: true/false (based on "CREDIT MEMO" header presence)
+2. Credit Type: 
+   - If Customer P.O. No. says "RETURN" → "Return Credit"
+   - Otherwise extract from document header or leave empty string
+3. Invoice Number: 8-digit number in top right "Invoice #" field (e.g., 20121712, 20121728)
+4. Invoice Date: MM/DD/YY format from "Invoice Date" field
+5. PO Number: Extract VRMA code from line item description
+   - Search description for text starting with "VRMA" followed by digits
+   - DO NOT include any prefix before "VRMA" (e.g., "R4VRMA314612" → extract "VRMA314612")
+   - Format: "VRMA" + digits (e.g., "VRMA314612", "VRMA314412")
+   - Use the FIRST VRMA found in the line items (all lines typically share same VRMA)
+   - Leave empty string if no VRMA pattern found
+6. Delivery Amount: Look for FREIGHT line at bottom (dollar amount or blank)
+7. Document Total: From "AMOUNT DUE" at bottom right (e.g., "360.02", "99.86")
+   - Format as negative with parentheses: "($360.02)", "($99.86)"
+8. Line Items - ONLY IF isCreditMemo=true, for EACH line item:
+
+   • NARDA Number: 
+     * Extract from "Customer P.O. No." field in header section
+     * This field indicates the credit type/reason
+     * Common values: "RETURN"
+     * This field is the SAME for all line items on the document
+     * Example: "RETURN"
+   
+   • Part Number: 
+     * Located at the BEGINNING of "Item Shipped / Description" field
+     * Format: Manufacturer code + alphanumeric part number
+     * Extract the FIRST continuous alphanumeric string
+     * Part number ends where the description text begins
+     * Examples: 
+       - "GE WR78X31904" → extract "WR78X31904"
+       - "GE WR29X44280" → extract "WR29X44280"
+       - "GE WR57X24979" → extract "WR57X24979"
+   
+   • Total Amount: 
+     * From "Total" column on far right
+     * Lines ending with "- N" indicate credits (negative amounts)
+     * Format as negative with parentheses: "($33.42)", "($66.44)", "($360.02)"
+   
+   • Bill Number: EMBEDDED IN DESCRIPTION - REQUIRED FOR ALL CREDITS
+     * SEARCH for 8-digit numbers WITHOUT decimals in the description text
+     * Pattern: Look for 8 consecutive digits (not followed by decimal point)
+     * CRITICAL RULE: Extract the 8-digit number that is NOT followed by ".00"
+     * Examples from descriptions:
+       - "26673.00 19864611 TROS1325SHOP" → extract "19864611" (not "26673")
+       - "96953.00 20090661 TRI12625" → extract "20090661" (not "96953")
+     * The bill number typically starts with "19" or "20" (invoice range)
+     * Numbers ending with ".00" are NOT bill numbers (those are different reference codes)
+     * ALWAYS 8 digits exactly
+     * Leave empty if no 8-digit number without decimal found
+   
+   • Sales Order Number: 
+     * Check description for "TRI" or "TROS" followed by digits
+     * Extract the FULL value including prefix
+     * Examples: "TROS1325SHOP", "TRI12625"
+     * Leave empty string if not found
+
+CRITICAL RULES:
+• nardaNumber comes from "Customer P.O. No." field (e.g., "RETURN")
+• poNumber is the VRMA authorization code from description, starting with "VRMA" only (e.g., "VRMA314612")
+• Part number appears at START of description (after manufacturer code like "GE")
+• originalBillNumber is the 8-digit number WITHOUT decimal point
+• Numbers with ".00" suffix (like 26673.00, 96953.00) are NOT bill numbers - skip these
+• The "- N" suffix on Total indicates a negative/credit amount - format with parentheses
+• Document Total should equal sum of all line totals + freight
+• All line items typically share the same nardaNumber and same VRMA (poNumber)
+• If isCreditMemo=false, return empty lineItems array with validationError
+• Output ONLY valid JSON, no explanations
+
+EXAMPLE OUTPUT (Based on Invoice 20121728):
+{
+  "isCreditMemo": true,
+  "creditType": "Return Credit",
+  "invoiceNumber": "20121728",
+  "invoiceDate": "12/18/25",
+  "poNumber": "VRMA314612",
+  "deliveryAmount": "$0.00",
+  "documentTotal": "($99.86)",
+  "lineItems": [
+    {
+      "nardaNumber": "RETURN",
+      "partNumber": "WR29X44280",
+      "totalAmount": "($33.42)",
+      "originalBillNumber": "20090661",
+      "salesOrderNumber": "TRI12625"
+    },
+    {
+      "nardaNumber": "RETURN",
+      "partNumber": "WR57X24979",
+      "totalAmount": "($66.44)",
+      "originalBillNumber": "20090661",
+      "salesOrderNumber": "TRI12625"
+    }
+  ],
+  "validationError": ""
+}
